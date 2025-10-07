@@ -1,0 +1,561 @@
+# ---------------------------------------------------
+# StorageClass
+# ---------------------------------------------------
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: flow-storage
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: cluster.local/nfs-subdir-external-provisioner
+parameters:
+  archiveOnDelete: "false"
+
+---
+
+# ---------------------------------------------------
+# Namespace
+# ---------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: flow
+
+---
+
+# ---------------------------------------------------
+# PersistentVolumes + PVCs
+# ---------------------------------------------------
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: flow-nfs-pv
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: flow-storage
+  nfs:
+    server: 10.0.0.134
+    path: /data/app2/flow/shared
+
+---
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: flow-nfs-pvc
+  namespace: flow
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: flow-storage
+  resources:
+    requests:
+      storage: 50Gi
+  volumeName: flow-nfs-pv
+
+---
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mariadb-nfs-pv
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: flow-storage
+  nfs:
+    server: 10.0.0.134
+    path: /data/app2/flow/mariadb
+
+---
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mariadb-pvc
+  namespace: flow
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: flow-storage
+  resources:
+    requests:
+      storage: 20Gi
+  volumeName: mariadb-nfs-pv
+
+---
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: minio-nfs-pv
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: flow-storage
+  nfs:
+    server: 10.0.0.134
+    path: /data/app2/flow/minio
+
+---
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-pvc
+  namespace: flow
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: flow-storage
+  resources:
+    requests:
+      storage: 50Gi
+  volumeName: minio-nfs-pv
+
+---
+
+# ---------------------------------------------------
+# Deployments + Services - WITH CORRECT IMAGES
+# ---------------------------------------------------
+
+# MariaDB
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mariadb
+  namespace: flow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mariadb
+  template:
+    metadata:
+      labels:
+        app: mariadb
+    spec:
+      containers:
+      - name: mariadb
+        image: mariadb:10.11
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          value: flowpass
+        - name: MYSQL_DATABASE
+          value: mlpipeline
+        - name: MYSQL_USER
+          value: mlpipeline
+        - name: MYSQL_PASSWORD
+          value: mlpipelinepass
+        ports:
+        - containerPort: 3306
+        volumeMounts:
+        - mountPath: /var/lib/mysql
+          name: mariadb-data
+      volumes:
+      - name: mariadb-data
+        persistentVolumeClaim:
+          claimName: mariadb-pvc
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: mariadb
+  namespace: flow
+spec:
+  ports:
+  - port: 3306
+    targetPort: 3306
+  selector:
+    app: mariadb
+
+---
+
+# MinIO
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: flow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+      - name: minio
+        image: minio/minio:RELEASE.2024-01-16T16-07-38Z
+        args: ["server", "/data"]
+        env:
+        - name: MINIO_ROOT_USER
+          value: minioadmin
+        - name: MINIO_ROOT_PASSWORD
+          value: minioadmin
+        ports:
+        - containerPort: 9000
+        - containerPort: 9001
+        volumeMounts:
+        - mountPath: /data
+          name: minio-data
+      volumes:
+      - name: minio-data
+        persistentVolumeClaim:
+          claimName: minio-pvc
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: flow
+spec:
+  ports:
+  - port: 9000
+    name: api
+    targetPort: 9000
+  - port: 9001
+    name: console
+    targetPort: 9001
+  selector:
+    app: minio
+
+---
+
+# Central Dashboard - CORRECT IMAGE
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: centraldashboard
+  namespace: flow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: centraldashboard
+  template:
+    metadata:
+      labels:
+        app: centraldashboard
+    spec:
+      containers:
+      - name: centraldashboard
+        image: kubeflownotebookswg/centraldashboard:v1.9.0
+        ports:
+        - containerPort: 8082
+        env:
+        - name: USERID_HEADER
+          value: kubeflow-userid
+        - name: USERID_PREFIX
+          value: ""
+        volumeMounts:
+        - mountPath: /mnt/shared
+          name: flow-shared
+      volumes:
+      - name: flow-shared
+        persistentVolumeClaim:
+          claimName: flow-nfs-pvc
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: centraldashboard
+  namespace: flow
+spec:
+  ports:
+  - port: 80
+    targetPort: 8082
+  selector:
+    app: centraldashboard
+
+---
+
+# ML Pipeline API Server - CORRECT IMAGE
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-pipeline
+  namespace: flow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ml-pipeline
+  template:
+    metadata:
+      labels:
+        app: ml-pipeline
+    spec:
+      containers:
+      - name: ml-pipeline
+        image: gcr.io/ml-pipeline/api-server:1.8.1
+        ports:
+        - containerPort: 8888
+        env:
+        - name: MYSQL_SERVICE_HOST
+          value: mariadb.flow.svc.cluster.local
+        - name: MYSQL_SERVICE_PORT
+          value: "3306"
+        - name: MYSQL_USER
+          value: mlpipeline
+        - name: MYSQL_PASSWORD
+          value: mlpipelinepass
+        - name: MYSQL_DATABASE
+          value: mlpipeline
+        - name: MINIO_SERVICE_HOST
+          value: minio.flow.svc.cluster.local
+        - name: MINIO_SERVICE_PORT
+          value: "9000"
+        - name: MINIO_ACCESS_KEY
+          value: minioadmin
+        - name: MINIO_SECRET_KEY
+          value: minioadmin
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: ml-pipeline
+  namespace: flow
+spec:
+  ports:
+  - port: 8888
+    targetPort: 8888
+  selector:
+    app: ml-pipeline
+
+---
+
+# Metadata GRPC Service - CORRECT IMAGE
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metadata-grpc-service
+  namespace: flow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: metadata-grpc-service
+  template:
+    metadata:
+      labels:
+        app: metadata-grpc-service
+    spec:
+      containers:
+      - name: metadata-grpc-service
+        image: gcr.io/ml-pipeline/metadata-envoy:1.8.1
+        ports:
+        - containerPort: 8080
+        env:
+        - name: MYSQL_HOST
+          value: mariadb.flow.svc.cluster.local
+        - name: MYSQL_PORT
+          value: "3306"
+        - name: MYSQL_DATABASE
+          value: mlpipeline
+        - name: MYSQL_USER
+          value: mlpipeline
+        - name: MYSQL_PASSWORD
+          value: mlpipelinepass
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: metadata-grpc-service
+  namespace: flow
+spec:
+  ports:
+  - port: 8080
+    targetPort: 8080
+  selector:
+    app: metadata-grpc-service
+
+---
+
+# Profile Controller - CORRECT IMAGE (using notebook controller as working substitute)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: profile-controller
+  namespace: flow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: profile-controller
+  template:
+    metadata:
+      labels:
+        app: profile-controller
+    spec:
+      containers:
+      - name: profile-controller
+        image: kubeflownotebookswg/profile-controller:v1.9.2
+        ports:
+        - containerPort: 8080
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: profile-controller
+  namespace: flow
+spec:
+  ports:
+  - port: 8080
+    targetPort: 8080
+  selector:
+    app: profile-controller
+
+---
+
+# Notebooks Controller - CORRECT IMAGE
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notebooks-controller
+  namespace: flow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notebooks-controller
+  template:
+    metadata:
+      labels:
+        app: notebooks-controller
+    spec:
+      containers:
+      - name: notebooks-controller
+        image: kubeflownotebookswg/notebook-controller:v1.9.0
+        ports:
+        - containerPort: 8080
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: notebooks-controller
+  namespace: flow
+spec:
+  ports:
+  - port: 8080
+    targetPort: 8080
+  selector:
+    app: notebooks-controller
+
+---
+
+# Pipeline Visualization Server - CORRECT IMAGE
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pipeline-visualization
+  namespace: flow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pipeline-visualization
+  template:
+    metadata:
+      labels:
+        app: pipeline-visualization
+    spec:
+      containers:
+      - name: pipeline-visualization
+        image: gcr.io/ml-pipeline/visualization-server:1.8.1
+        ports:
+        - containerPort: 8888
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: pipeline-visualization
+  namespace: flow
+spec:
+  ports:
+  - port: 8888
+    targetPort: 8888
+  selector:
+    app: pipeline-visualization
+
+---
+
+# CORRECTED Istio VirtualService
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: flow-virtualservice
+  namespace: flow
+spec:
+  hosts:
+  - "*"
+  gateways:
+  - istio-system/istio-ingressgateway-nodeport
+  http:
+  - match:
+    - uri:
+        prefix: /pipeline
+    rewrite:
+      uri: /
+    route:
+    - destination:
+        host: ml-pipeline.flow.svc.cluster.local
+        port:
+          number: 8888
+  - match:
+    - uri:
+        prefix: /visualization
+    rewrite:
+      uri: /
+    route:
+    - destination:
+        host: pipeline-visualization.flow.svc.cluster.local
+        port:
+          number: 8888
+  - match:
+    - uri:
+        prefix: /minio
+    rewrite:
+      uri: /
+    route:
+    - destination:
+        host: minio.flow.svc.cluster.local
+        port:
+          number: 9001
+  - match:
+    - uri:
+        prefix: /
+    route:
+    - destination:
+        host: centraldashboard.flow.svc.cluster.local
+        port:
+          number: 80
