@@ -1,0 +1,103 @@
+---
+# ===========================
+# StorageClass
+# ===========================
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: webui
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+---
+# ===========================
+# PersistentVolumes (PV)
+# ===========================
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: openwebui-models-pv
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteMany
+  storageClassName: webui
+  nfs:
+    server: 10.0.0.134
+    path: /data/app1/openwebui/models
+  persistentVolumeReclaimPolicy: Retain
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: openwebui-config-pv
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteMany
+  storageClassName: webui
+  nfs:
+    server: 10.0.0.134
+    path: /data/app1/openwebui/config
+  persistentVolumeReclaimPolicy: Retain
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: openwebui-logs-pv
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteMany
+  storageClassName: webui
+  nfs:
+    server: 10.0.0.134
+    path: /data/app1/openwebui/logs
+  persistentVolumeReclaimPolicy: Retain
+---
+# ===========================
+# PersistentVolumeClaims (PVC)
+# ===========================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openwebui-models-pvc
+  namespace: openwebui
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: webui
+  resources:
+    requests:
+      storage: 50Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openwebui-config-pvc
+  namespace: openwebui
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: webui
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openwebui-logs-pvc
+  namespace: openwebui
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: webui
+  resources:
+    requests:
+      storage: 10Gi
+

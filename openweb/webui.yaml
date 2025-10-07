@@ -1,0 +1,169 @@
+---
+# ===========================
+# Namespace
+# ===========================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: openwebui
+---
+# ===========================
+# StorageClass
+# ===========================
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: webui
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+---
+# ===========================
+# PersistentVolumes (PV)
+# ===========================
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: openwebui-models-pv
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteMany
+  storageClassName: webui
+  nfs:
+    server: 10.0.0.134
+    path: /data/app1/openwebui/models
+  persistentVolumeReclaimPolicy: Retain
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: openwebui-config-pv
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteMany
+  storageClassName: webui
+  nfs:
+    server: 10.0.0.134
+    path: /data/app1/openwebui/config
+  persistentVolumeReclaimPolicy: Retain
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: openwebui-logs-pv
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteMany
+  storageClassName: webui
+  nfs:
+    server: 10.0.0.134
+    path: /data/app1/openwebui/logs
+  persistentVolumeReclaimPolicy: Retain
+---
+# ===========================
+# PersistentVolumeClaims (PVC)
+# ===========================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openwebui-models-pvc
+  namespace: openwebui
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: webui
+  resources:
+    requests:
+      storage: 50Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openwebui-config-pvc
+  namespace: openwebui
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: webui
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openwebui-logs-pvc
+  namespace: openwebui
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: webui
+  resources:
+    requests:
+      storage: 10Gi
+---
+# ===========================
+# Open WebUI Deployment
+# ===========================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openwebui
+  namespace: openwebui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openwebui
+  template:
+    metadata:
+      labels:
+        app: openwebui
+    spec:
+      containers:
+      - name: openwebui
+        image: ghcr.io/open-webui/open-webui:main
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: models
+          mountPath: /models
+        - name: config
+          mountPath: /config
+        - name: logs
+          mountPath: /logs
+      volumes:
+      - name: models
+        persistentVolumeClaim:
+          claimName: openwebui-models-pvc
+      - name: config
+        persistentVolumeClaim:
+          claimName: openwebui-config-pvc
+      - name: logs
+        persistentVolumeClaim:
+          claimName: openwebui-logs-pvc
+---
+# ===========================
+# NodePort Service
+# ===========================
+apiVersion: v1
+kind: Service
+metadata:
+  name: openwebui
+  namespace: openwebui
+spec:
+  type: NodePort
+  selector:
+    app: openwebui
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30080
+
