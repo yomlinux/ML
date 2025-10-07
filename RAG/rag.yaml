@@ -156,9 +156,9 @@ spec:
                   results = collection.query(query_texts=[req.query], n_results=req.top_k)
                   return {"results": results}
               EOF
-              uvicorn /data/chroma/main:app --host 0.0.0.0 --port 8080
+              uvicorn /data/chroma/main:app --host 0.0.0.0 --port 8090
           ports:
-            - containerPort: 8080
+            - containerPort: 8090
           volumeMounts:
             - mountPath: /data/chroma
               name: chroma-storage
@@ -180,8 +180,8 @@ spec:
   selector:
     app: langchain
   ports:
-    - port: 8080
-      targetPort: 8080
+    - port: 8090
+      targetPort: 8090
 ---
 # ===========================
 # LangChain NodePort Service (for external access)
@@ -196,7 +196,7 @@ spec:
   selector:
     app: langchain
   ports:
-    - port: 8080
-      targetPort: 8080
+    - port: 8090
+      targetPort: 8090
       nodePort: 32081
 
