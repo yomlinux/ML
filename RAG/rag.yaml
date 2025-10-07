@@ -1,0 +1,202 @@
+---
+# ===========================
+# StorageClass
+# ===========================
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: webui
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+---
+# ===========================
+# PersistentVolume
+# ===========================
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: chroma-pv
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes:
+    - ReadWriteMany
+  storageClassName: webui
+  nfs:
+    server: 10.0.0.134
+    path: /data/app1/webui/vecstore
+  persistentVolumeReclaimPolicy: Retain
+---
+# ===========================
+# PersistentVolumeClaim
+# ===========================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: chroma-pvc
+  namespace: openwebui
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: webui
+  resources:
+    requests:
+      storage: 20Gi
+---
+# ===========================
+# Chroma Deployment
+# ===========================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chroma
+  namespace: openwebui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chroma
+  template:
+    metadata:
+      labels:
+        app: chroma
+    spec:
+      containers:
+        - name: chroma
+          image: ghcr.io/chroma-core/chroma:latest
+          ports:
+            - containerPort: 8000
+          volumeMounts:
+            - mountPath: /chroma_data
+              name: chroma-storage
+      volumes:
+        - name: chroma-storage
+          persistentVolumeClaim:
+            claimName: chroma-pvc
+---
+# ===========================
+# Chroma ClusterIP Service (for internal access)
+# ===========================
+apiVersion: v1
+kind: Service
+metadata:
+  name: chroma-clusterip
+  namespace: openwebui
+spec:
+  type: ClusterIP
+  selector:
+    app: chroma
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+# ===========================
+# Chroma NodePort Service (for external access)
+# ===========================
+apiVersion: v1
+kind: Service
+metadata:
+  name: chroma-nodeport
+  namespace: openwebui
+spec:
+  type: NodePort
+  selector:
+    app: chroma
+  ports:
+    - port: 8000
+      targetPort: 8000
+      nodePort: 32080
+---
+# ===========================
+# LangChain Orchestrator Deployment
+# ===========================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langchain-orchestrator
+  namespace: openwebui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: langchain
+  template:
+    metadata:
+      labels:
+        app: langchain
+    spec:
+      containers:
+        - name: langchain
+          image: python:3.11-slim
+          command: ["bash", "-c", "--"]
+          args:
+            - |
+              pip install --no-cache-dir chromadb langchain fastapi uvicorn pydantic && \
+              mkdir -p /data/chroma && \
+              cat << 'EOF' > /data/chroma/main.py
+              from fastapi import FastAPI
+              from pydantic import BaseModel
+              import chromadb
+
+              app = FastAPI()
+              client = chromadb.PersistentClient(path="/data/chroma")
+
+              class QueryRequest(BaseModel):
+                  query: str
+                  top_k: int = 5
+
+              @app.post("/query")
+              async def query_rag(req: QueryRequest):
+                  try:
+                      collection = client.get_collection("default")
+                  except:
+                      collection = client.create_collection("default")
+                  results = collection.query(query_texts=[req.query], n_results=req.top_k)
+                  return {"results": results}
+              EOF
+              uvicorn /data/chroma/main:app --host 0.0.0.0 --port 8080
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - mountPath: /data/chroma
+              name: chroma-storage
+      volumes:
+        - name: chroma-storage
+          persistentVolumeClaim:
+            claimName: chroma-pvc
+---
+# ===========================
+# LangChain ClusterIP Service (for internal access)
+# ===========================
+apiVersion: v1
+kind: Service
+metadata:
+  name: langchain-clusterip
+  namespace: openwebui
+spec:
+  type: ClusterIP
+  selector:
+    app: langchain
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+# ===========================
+# LangChain NodePort Service (for external access)
+# ===========================
+apiVersion: v1
+kind: Service
+metadata:
+  name: langchain-nodeport
+  namespace: openwebui
+spec:
+  type: NodePort
+  selector:
+    app: langchain
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 32081
+
